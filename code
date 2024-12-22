@@ -1,0 +1,86 @@
+% Set up a unique model name
+model = ['MOSFET_Model_' char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'))];
+new_system(model); % Create a new Simulink model
+open_system(model); % Open the new model
+
+% Add and configure blocks for the MOSFET model
+
+% Gate Voltage
+add_block('simulink/Sources/Constant', [model '/GateVoltage'], ...
+    'Value', '5', 'Position', [100, 100, 140, 120]);
+
+% Threshold Voltage
+add_block('simulink/Sources/Constant', [model '/ThresholdVoltage'], ...
+    'Value', '1', 'Position', [100, 150, 140, 170]);
+
+% Drain-Source Voltage (VDS)
+add_block('simulink/Sources/Constant', [model '/VDS'], ...
+    'Value', '10', 'Position', [100, 200, 140, 220]);
+
+% Subtract VGS - Vth
+add_block('simulink/Math Operations/Sum', [model '/VGS_minus_Vth'], ...
+    'Inputs', '+-', 'Position', [200, 125, 250, 145]);
+
+% MATLAB Function Block for MOSFET behavior
+add_block('simulink/User-Defined Functions/MATLAB Function', [model '/MOSFET'], ...
+    'Position', [300, 125, 400, 165]);
+set_param([model '/MOSFET'], 'FunctionName', 'computeDrainCurrent');
+
+% Define the MATLAB Function logic
+mosfet_function_code = [
+    'function I_D = computeDrainCurrent(V_GS, V_DS, V_th)' newline ...
+    '    % MOSFET Drain Current Model' newline ...
+    '    if V_GS <= V_th' newline ...
+    '        I_D = 0; % Cutoff region' newline ...
+    '    elseif V_DS < (V_GS - V_th)' newline ...
+    '        I_D = (V_GS - V_th) * V_DS; % Linear region' newline ...
+    '    else' newline ...
+    '        I_D = 0.5 * (V_GS - V_th)^2; % Saturation region' newline ...
+    '    end' newline ...
+    'end'];
+set_param([model '/MOSFET'], 'Script', mosfet_function_code);
+
+% Power Dissipation Block (P = I_D * V_DS)
+add_block('simulink/Math Operations/Product', [model '/PowerDissipation'], ...
+    'Position', [450, 125, 500, 145]);
+
+% Ambient Temperature (Constant)
+add_block('simulink/Sources/Constant', [model '/AmbientTemp'], ...
+    'Value', '25', 'Position', [400, 200, 440, 220]);
+
+% Thermal Resistance (Gain Block)
+add_block('simulink/Math Operations/Gain', [model '/ThermalResistance'], ...
+    'Gain', '0.1', 'Position', [550, 125, 600, 145]);
+
+% Thermal Sum Block (Sum of power dissipation and ambient temperature)
+add_block('simulink/Math Operations/Sum', [model '/ThermalSum'], ...
+    'Inputs', '++', 'Position', [650, 125, 700, 145]);
+
+% Scope for Junction Temperature
+add_block('simulink/Sinks/Scope', [model '/JunctionTempScope'], ...
+    'Position', [750, 125, 800, 145]);
+
+% Scope for Drain Current
+add_block('simulink/Sinks/Scope', [model '/DrainCurrentScope'], ...
+    'Position', [500, 200, 550, 220]);
+
+% Connect the blocks
+add_line(model, 'GateVoltage/1', 'VGS_minus_Vth/1'); % Gate Voltage to VGS - Vth
+add_line(model, 'ThresholdVoltage/1', 'VGS_minus_Vth/2'); % Threshold Voltage to VGS - Vth
+add_line(model, 'VGS_minus_Vth/1', 'MOSFET/1'); % VGS - Vth to MOSFET block
+add_line(model, 'VDS/1', 'MOSFET/2'); % VDS to MOSFET block
+add_line(model, 'ThresholdVoltage/1', 'MOSFET/3'); % Threshold Voltage to MOSFET block
+add_line(model, 'MOSFET/1', 'PowerDissipation/1'); % Drain Current to Power Dissipation
+add_line(model, 'VDS/1', 'PowerDissipation/2'); % VDS to Power Dissipation
+add_line(model, 'PowerDissipation/1', 'ThermalResistance/1'); % Power Dissipation to Thermal Resistance
+add_line(model, 'ThermalResistance/1', 'ThermalSum/1'); % Thermal Resistance to Thermal Sum
+add_line(model, 'AmbientTemp/1', 'ThermalSum/2'); % Ambient Temperature to Thermal Sum
+add_line(model, 'ThermalSum/1', 'JunctionTempScope/1'); % Thermal Sum to Junction Temperature Scope
+add_line(model, 'MOSFET/1', 'DrainCurrentScope/1'); % Drain Current to Drain Current Scope
+
+% Set simulation parameters
+set_param(model, 'StopTime', '10'); % Stop time for simulation
+
+% Save and run the model
+save_system(model);
+sim(model);
